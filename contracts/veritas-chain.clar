@@ -499,3 +499,118 @@
         
         ;; Trust Commitment Transaction
         (try! (stx-transfer? trust-stake tx-sender (as-contract tx-sender)))
+
+        ;; Peer Trust Registration
+        (map-set peer-endorsements
+          { endorser: endorser-id, endorsed: target-profile-id }
+          { 
+            endorsement-block: endorsement-block,
+            stake-commitment: trust-stake,
+            endorsement-message: endorsement-message,
+            trust-level: trust-stake
+          }
+        )
+        
+        ;; Target Profile Enhancement
+        (match (get-profile-by-id target-profile-id)
+          target-profile
+          (map-set verified-profiles
+            { profile-id: target-profile-id }
+            (merge target-profile { 
+              endorsement-count: (+ (get endorsement-count target-profile) u1) 
+            })
+          )
+          false
+        )
+        (ok true)
+      )
+      ERR_PROFILE_NOT_FOUND
+    )
+  )
+)
+
+;; SYSTEM UTILITIES - METRICS & STATE MANAGEMENT
+
+(define-private (update-connection-metrics (target-id uint) (connector-id uint) (is-connecting bool))
+  (begin
+    ;; Target Profile Connection Count Update
+    (match (get-profile-by-id target-id)
+      target-profile
+      (map-set verified-profiles
+        { profile-id: target-id }
+        (merge target-profile { 
+          connection-count: (if is-connecting 
+                              (+ (get connection-count target-profile) u1)
+                              (- (get connection-count target-profile) u1))
+        })
+      )
+      false
+    )
+    
+    ;; Connector Profile Metrics Adjustment
+    (match (get-profile-by-id connector-id)
+      connector-profile
+      (map-set verified-profiles
+        { profile-id: connector-id }
+        (merge connector-profile { 
+          connection-count: (if is-connecting
+                              (+ (get connection-count connector-profile) u1)
+                              (- (get connection-count connector-profile) u1))
+        })
+      )
+      false
+    )
+  )
+)
+
+(define-private (enhance-content-trust-metrics (content-id uint))
+  (begin
+    ;; Content Trust Enhancement
+    (match (get-content-by-id content-id)
+      content-data
+      (begin
+        (map-set published-content
+          { content-id: content-id }
+          (merge content-data { 
+            trust-endorsements: (+ (get trust-endorsements content-data) u1) 
+          })
+        )
+        
+        ;; Creator Profile Trust Boost
+        (match (get-profile-by-id (get creator content-data))
+          creator-profile
+          (map-set verified-profiles
+            { profile-id: (get creator content-data) }
+            (merge creator-profile { 
+              endorsement-count: (+ (get endorsement-count creator-profile) u1) 
+            })
+          )
+          false
+        )
+      )
+      false
+    )
+  )
+)
+
+;; GOVERNANCE FUNCTIONS - PROTOCOL ADMINISTRATION
+
+(define-public (adjust-governance-fee (new-fee-rate uint))
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_UNAUTHORIZED)
+    (asserts! (<= new-fee-rate u1000) ERR_INVALID_AMOUNT) ;; Maximum 10% protocol fee
+    (var-set governance-fee-rate new-fee-rate)
+    (ok true)
+  )
+)
+
+(define-public (treasury-withdrawal (amount uint) (recipient principal))
+  (begin
+    (asserts! (is-eq tx-sender CONTRACT_OWNER) ERR_UNAUTHORIZED)
+    (asserts! (<= amount (var-get protocol-treasury)) ERR_INSUFFICIENT_STAKE)
+    
+    (try! (as-contract (stx-transfer? amount tx-sender recipient)))
+    (var-set protocol-treasury (- (var-get protocol-treasury) amount))
+    (ok true)
+  )
+)
