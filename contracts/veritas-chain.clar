@@ -105,3 +105,105 @@
     content-active: bool
   }
 )
+
+;; Trust Endorsement System
+(define-map content-endorsements
+  { content-id: uint, endorser: uint }
+  { 
+    endorsement-block: uint,
+    stake-amount: uint,
+    trust-weight: uint
+  }
+)
+
+(define-map peer-endorsements
+  { endorser: uint, endorsed: uint }
+  { 
+    endorsement-block: uint,
+    stake-commitment: uint,
+    endorsement-message: (string-utf8 140),
+    trust-level: uint
+  }
+)
+
+;; Economic Activity Tracking
+(define-map stake-commitments
+  { profile-id: uint, staker: principal }
+  { 
+    commitment-amount: uint,
+    commitment-block: uint,
+    lock-duration: uint
+  }
+)
+
+;; QUERY FUNCTIONS - PROFILE & IDENTITY RESOLUTION
+
+(define-read-only (get-profile-by-id (profile-id uint))
+  (map-get? verified-profiles { profile-id: profile-id })
+)
+
+(define-read-only (resolve-username (username (string-ascii 50)))
+  (match (map-get? username-registry username)
+    profile-id (get-profile-by-id profile-id)
+    none
+  )
+)
+
+(define-read-only (resolve-principal (user principal))
+  (match (map-get? principal-registry user)
+    profile-id (get-profile-by-id profile-id)
+    none
+  )
+)
+
+(define-read-only (username-available? (username (string-ascii 50)))
+  (is-none (map-get? username-registry username))
+)
+
+(define-read-only (profiles-connected? (profile-a uint) (profile-b uint))
+  (is-some (map-get? social-connections { connector: profile-a, connected-to: profile-b }))
+)
+
+(define-read-only (get-content-by-id (content-id uint))
+  (map-get? published-content { content-id: content-id })
+)
+
+;; QUERY FUNCTIONS - CREDIBILITY & REPUTATION METRICS
+
+(define-read-only (calculate-credibility-score (profile-id uint))
+  (match (get-profile-by-id profile-id)
+    profile-data
+    (let
+      (
+        (stake-foundation (get total-stake profile-data))
+        (network-multiplier (* (get connection-count profile-data) u1000))
+        (trust-amplifier (* (get endorsement-count profile-data) u2500))
+        (activity-bonus (* (get content-count profile-data) u750))
+      )
+      (+ stake-foundation (+ network-multiplier (+ trust-amplifier activity-bonus)))
+    )
+    u0
+  )
+)
+
+(define-read-only (get-protocol-stats)
+  {
+    total-profiles: (var-get next-profile-id),
+    total-content: (var-get next-content-id),
+    treasury-balance: (var-get protocol-treasury),
+    governance-fee: (var-get governance-fee-rate)
+  }
+)
+
+;; CORE FUNCTIONS - VERIFIED IDENTITY CREATION
+
+(define-public (establish-verified-identity 
+  (username (string-ascii 50))
+  (bio (string-utf8 280))
+  (avatar-uri (string-ascii 200))
+)
+  (let
+    (
+      (new-profile-id (var-get next-profile-id))
+      (genesis-block stacks-block-height)
+    )
