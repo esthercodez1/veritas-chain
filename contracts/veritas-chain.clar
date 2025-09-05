@@ -401,3 +401,101 @@
     )
   )
 )
+
+(define-public (amplify-content (content-id uint) (amplification-amount uint))
+  (let
+    (
+      (amplification-block stacks-block-height)
+    )
+    ;; Amplification Validation
+    (asserts! (>= amplification-amount MIN_CONTENT_BOOST) ERR_INVALID_AMOUNT)
+    (asserts! (is-some (get-content-by-id content-id)) ERR_CONTENT_NOT_FOUND)
+    (asserts! (>= (stx-get-balance tx-sender) amplification-amount) ERR_INSUFFICIENT_STAKE)
+    
+    ;; Economic Commitment
+    (try! (stx-transfer? amplification-amount tx-sender (as-contract tx-sender)))
+    
+    ;; Content Amplification Enhancement
+    (match (get-content-by-id content-id)
+      content-data
+      (map-set published-content
+        { content-id: content-id }
+        (merge content-data { 
+          amplification-stake: (+ (get amplification-stake content-data) amplification-amount) 
+        })
+      )
+      false
+    )
+    
+    ;; Treasury Contribution
+    (var-set protocol-treasury (+ (var-get protocol-treasury) 
+                                  (/ (* amplification-amount (var-get governance-fee-rate)) u10000)))
+    (ok true)
+  )
+)
+
+;; CORE FUNCTIONS - TRUST ENDORSEMENT SYSTEM
+
+(define-public (endorse-content (content-id uint) (endorsement-stake uint))
+  (let
+    (
+      (endorser-profile (map-get? principal-registry tx-sender))
+      (endorsement-block stacks-block-height)
+    )
+    ;; Endorsement Validation
+    (asserts! (>= endorsement-stake MIN_TRUST_ENDORSEMENT) ERR_INVALID_AMOUNT)
+    (asserts! (is-some (get-content-by-id content-id)) ERR_CONTENT_NOT_FOUND)
+    
+    (match endorser-profile
+      endorser-id
+      (begin
+        ;; Duplicate Prevention
+        (asserts! (is-none (map-get? content-endorsements 
+                                    { content-id: content-id, endorser: endorser-id })) 
+                  ERR_DUPLICATE_ENDORSEMENT)
+        (asserts! (>= (stx-get-balance tx-sender) endorsement-stake) ERR_INSUFFICIENT_STAKE)
+        
+        ;; Trust Stake Commitment
+        (try! (stx-transfer? endorsement-stake tx-sender (as-contract tx-sender)))
+        
+        ;; Endorsement Registration
+        (map-set content-endorsements
+          { content-id: content-id, endorser: endorser-id }
+          { 
+            endorsement-block: endorsement-block,
+            stake-amount: endorsement-stake,
+            trust-weight: endorsement-stake
+          }
+        )
+        
+        ;; Content Trust Enhancement
+        (enhance-content-trust-metrics content-id)
+        (ok true)
+      )
+      ERR_PROFILE_NOT_FOUND
+    )
+  )
+)
+
+(define-public (endorse-peer (target-profile-id uint) (trust-stake uint) (endorsement-message (string-utf8 140)))
+  (let
+    (
+      (endorser-profile (map-get? principal-registry tx-sender))
+      (endorsement-block stacks-block-height)
+    )
+    ;; Peer Endorsement Validation
+    (asserts! (>= trust-stake MIN_TRUST_ENDORSEMENT) ERR_INVALID_AMOUNT)
+    (asserts! (is-some (get-profile-by-id target-profile-id)) ERR_PROFILE_NOT_FOUND)
+    
+    (match endorser-profile
+      endorser-id
+      (begin
+        ;; Self-Endorsement Prevention
+        (asserts! (not (is-eq endorser-id target-profile-id)) ERR_SELF_REFERENTIAL)
+        (asserts! (is-none (map-get? peer-endorsements 
+                                    { endorser: endorser-id, endorsed: target-profile-id })) 
+                  ERR_DUPLICATE_ENDORSEMENT)
+        (asserts! (>= (stx-get-balance tx-sender) trust-stake) ERR_INSUFFICIENT_STAKE)
+        
+        ;; Trust Commitment Transaction
+        (try! (stx-transfer? trust-stake tx-sender (as-contract tx-sender)))
