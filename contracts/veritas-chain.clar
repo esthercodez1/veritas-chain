@@ -306,3 +306,98 @@
       (connector-profile (map-get? principal-registry tx-sender))
       (connection-block stacks-block-height)
     )
+    (match connector-profile
+      connector-id
+      (begin
+        ;; Connection Validation
+        (asserts! (not (is-eq connector-id target-profile-id)) ERR_SELF_REFERENTIAL)
+        (asserts! (is-some (get-profile-by-id target-profile-id)) ERR_PROFILE_NOT_FOUND)
+        (asserts! (not (profiles-connected? connector-id target-profile-id)) ERR_ALREADY_CONNECTED)
+        
+        ;; Social Graph Extension
+        (map-set social-connections
+          { connector: connector-id, connected-to: target-profile-id }
+          { 
+            established-at: connection-block,
+            stake-weight: u1000,
+            connection-active: true 
+          }
+        )
+        
+        ;; Network Metrics Update
+        (update-connection-metrics target-profile-id connector-id true)
+        (ok true)
+      )
+      ERR_PROFILE_NOT_FOUND
+    )
+  )
+)
+
+(define-public (dissolve-connection (target-profile-id uint))
+  (let
+    (
+      (connector-profile (map-get? principal-registry tx-sender))
+    )
+    (match connector-profile
+      connector-id
+      (begin
+        ;; Connection Validation
+        (asserts! (profiles-connected? connector-id target-profile-id) ERR_NOT_CONNECTED)
+        
+        ;; Connection Termination
+        (map-delete social-connections { connector: connector-id, connected-to: target-profile-id })
+        
+        ;; Network Metrics Adjustment
+        (update-connection-metrics target-profile-id connector-id false)
+        (ok true)
+      )
+      ERR_PROFILE_NOT_FOUND
+    )
+  )
+)
+
+;; CORE FUNCTIONS - CONTENT PUBLICATION & AMPLIFICATION
+
+(define-public (publish-content (content-data (string-utf8 500)))
+  (let
+    (
+      (creator-profile (map-get? principal-registry tx-sender))
+      (new-content-id (var-get next-content-id))
+      (publication-block stacks-block-height)
+    )
+    (match creator-profile
+      creator-id
+      (begin
+        ;; Content Publication
+        (map-set published-content
+          { content-id: new-content-id }
+          {
+            creator: creator-id,
+            content-data: content-data,
+            publication-block: publication-block,
+            amplification-stake: u0,
+            trust-endorsements: u0,
+            content-active: true
+          }
+        )
+        
+        ;; Creator Activity Metrics
+        (match (get-profile-by-id creator-id)
+          creator-data
+          (map-set verified-profiles
+            { profile-id: creator-id }
+            (merge creator-data { 
+              content-count: (+ (get content-count creator-data) u1) 
+            })
+          )
+          false
+        )
+        
+        ;; Protocol State Evolution
+        (var-set next-content-id (+ new-content-id u1))
+        (ok new-content-id)
+      )
+      ERR_PROFILE_NOT_FOUND
+    )
+  )
+)
